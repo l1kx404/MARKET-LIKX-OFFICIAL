@@ -1,139 +1,148 @@
-import os, json, random, qrcode
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler
+import os, json, qrcode
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-STORE_NAME = "MARKET LIKX OFFICIAL"
+DATA_FILE = "data.json"
 
-def load_j(f, d):
-    try: return json.load(open(f))
-    except: return d
-def save_j(f, d): open(f,"w").write(json.dumps(d, indent=2))
-def load_db(): return load_j("database.json", {"qris_statis": os.getenv("QRIS_STATIS",""), "produk": {}})
-def save_db(d): save_j("database.json", d)
+def load_data():
+    if not os.path.exists(DATA_FILE):
+        return {"products": {}, "qris": "BELUM DISET", "banned": [], "omset": 0, "users": []}
+    try:
+        with open(DATA_FILE) as f: return json.load(f)
+    except: return {"products": {}, "qris": "BELUM DISET", "banned": [], "omset": 0, "users": []}
 
-NAMA, HARGA, SET_QRIS, NOMINAL_BEBAS = range(4)
+def save_data(d):
+    with open(DATA_FILE, "w") as f: json.dump(d, f)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    banned = load_j("banned.json", [])
-    if uid in banned: await update.message.reply_text("🚫 AKUN LU DI-BANNED."); return
-    users = load_j("users.json", [])
-    if uid not in users: users.append(uid); save_j("users.json", users)
-    db = load_db()
-    text = f"✨ *{STORE_NAME}* ✨\n━━━━━━━━━━━━━━━\n🛍️ PILIH PRODUK / NOMINAL BEBAS, BAYAR QRIS, OTOMATIS TERKIRIM."
-    kb = [[InlineKeyboardButton(f"{v['nama'].upper()} - RP{v['harga']:,}", callback_data=f"buy_{k}")] for k,v in db["produk"].items()]
-    kb.append([InlineKeyboardButton("💰 NOMINAL BEBAS (MIN 1K)", callback_data="bebas")])
-    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+async def start(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    d = load_data()
+    uid = u.effective_user.id
+    if uid in d["banned"]: return
+    if uid not in d["users"]:
+        d["users"].append(uid); save_data(d)
+    kb = [[InlineKeyboardButton("💰 NOMINAL BEBAS (MIN 1K)", callback_data="bebas")]]
+    for pid, p in d["products"].items():
+        kb.append([InlineKeyboardButton(f"{p['nama']} - Rp{p['harga']:,} (Stok:{len(p['codes'])})", callback_data=f"buy_{pid}")])
+    await u.message.reply_text("✨ MARKET LIKX OFFICIAL ✨\n🛍️ PILIH PRODUK, BAYAR QRIS, OTOMATIS TERKIRIM.",
+        reply_markup=InlineKeyboardMarkup(kb))
 
-async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q=update.callback_query; await q.answer()
-    db=load_db(); pid=q.data.split("_",1)[1]; p=db["produk"][pid]
-    stok = load_j("stok.json", {})
-    if pid in stok and not stok[pid]:
-        await q.message.reply_text("🚫 STOK HABIS!"); return
-    unik=random.randint(11,99); total=p['harga']+unik
-    context.user_data.update({'tagihan':total,'produk':p['nama'],'pid':pid})
-    qrcode.make(f"{db['qris_statis']}|{total}").save("/tmp/qris.png")
-    await q.message.reply_photo(open("/tmp/qris.png","rb"), caption=f"🧾 *INVOICE - {STORE_NAME}*\n📦 {p['nama'].upper()}\n💰 *RP{total:,}*\n\nKIRIM FOTO BUKTI.", parse_mode='Markdown')
+async def panel(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    if u.effective_user.id!= ADMIN_ID: return
+    kb = [
+        [InlineKeyboardButton("➕ TAMBAH PRODUK", callback_data="add_prod")],
+        [InlineKeyboardButton("🗑️ HAPUS PRODUK", callback_data="del_prod")],
+        [InlineKeyboardButton("📦 LIHAT PRODUK", callback_data="list_prod")],
+        [InlineKeyboardButton("🚫 LIST BANNED", callback_data="list_ban")],
+    ]
+    await u.message.reply_text("⚙️ PANEL ADMIN", reply_markup=InlineKeyboardMarkup(kb))
 
-async def bebas_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q=update.callback_query; await q.answer()
-    await q.message.reply_text("KIRIM NOMINAL (MIN RP1.000):", parse_mode='Markdown'); return NOMINAL_BEBAS
-async def bebas_exec(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try: nominal=int(update.message.text.replace(".",""))
-    except: await update.message.reply_text("HARUS ANGKA!"); return NOMINAL_BEBAS
-    if nominal < 1000: await update.message.reply_text("🚫 MINIMAL RP1.000!"); return NOMINAL_BEBAS
-    db=load_db(); total=nominal+random.randint(11,99)
-    context.user_data.update({'tagihan':total,'produk':f"CUSTOM RP{nominal:,}",'pid':'custom'})
-    qrcode.make(f"{db['qris_statis']}|{total}").save("/tmp/qris.png")
-    await update.message.reply_photo(open("/tmp/qris.png","rb"), caption=f"🧾 *INVOICE CUSTOM - {STORE_NAME}*\n💰 *RP{total:,}*", parse_mode='Markdown')
-    return ConversationHandler.END
+async def button_handler(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query
+    await q.answer()
+    d = load_data()
+    data = q.data
+    try:
+        if data == "bebas":
+            c.user_data["mode"] = "input_nominal"
+            await q.message.reply_text("Masukin nominal (min 1000):\nContoh: 15000")
+        elif data.startswith("buy_"):
+            pid = data[4:]
+            p = d["products"].get(pid)
+            if not p or not p["codes"]:
+                await q.message.reply_text("Stok habis."); return
+            c.user_data["mode"] = "bayar"
+            c.user_data["pid"] = pid
+            c.user_data["harga"] = p["harga"]
+            qr = qrcode.make(d["qris"]); qr.save("qris.png")
+            await q.message.reply_photo(open("qris.png","rb"), caption=f"Bayar Rp{p['harga']:,}\nKlik ✅ SUDAH BAYAR",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ SUDAH BAYAR", callback_data="paid")]]))
+        elif data == "paid" or data == "paid_bebas":
+            pid = c.user_data.get("pid")
+            harga = c.user_data.get("harga", 0)
+            if data == "paid_bebas":
+                d["omset"] += harga; save_data(d)
+                await q.message.reply_text(f"✅ Terima kasih! Pembayaran Rp{harga:,} diterima.\nAdmin akan cek manual.")
+            else:
+                if not pid or pid not in d["products"]:
+                    await q.message.reply_text("Sesi expired, /start lagi"); return
+                p = d["products"][pid]
+                if not p["codes"]:
+                    await q.message.reply_text("Stok habis."); return
+                kode = p["codes"].pop(0)
+                d["omset"] += harga; save_data(d)
+                await q.message.reply_text(f"✅ PEMBAYARAN DITERIMA\nKode lu:\n`{kode}`", parse_mode="Markdown")
+            c.user_data.clear()
+        elif data == "add_prod":
+            c.user_data["mode"] = "add_prod"
+            await q.message.reply_text("Format:\nNAMA | HARGA\nContoh:\nNetflix 1 Bulan | 15000")
+        elif data == "del_prod":
+            kb = [[InlineKeyboardButton(p["nama"], callback_data=f"del_{pid}")] for pid,p in d["products"].items()]
+            await q.message.reply_text("Pilih hapus:", reply_markup=InlineKeyboardMarkup(kb) if kb else None)
+        elif data.startswith("del_"):
+            pid = data[4:]
+            if pid in d["products"]: del d["products"][pid]; save_data(d)
+            await q.message.reply_text("Dihapus.")
+        elif data == "list_prod":
+            t = "\n".join([f"{pid}: {p['nama']} Rp{p['harga']:,} stok:{len(p['codes'])}" for pid,p in d["products"].items()]) or "Kosong"
+            await q.message.reply_text(t)
+        elif data == "list_ban":
+            await q.message.reply_text("Banned: "+str(d["banned"]))
+    except Exception as e:
+        await q.message.reply_text(f"Error: {e}")
 
-async def auto_cek(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid=update.effective_user.id; tagihan=context.user_data.get('tagihan')
-    if not tagihan: await update.message.reply_text("KLIK /START DULU."); return
-    pid=context.user_data.get('pid','custom'); stok=load_j("stok.json", {})
-    kode=f"AUTO-{random.randint(1000,9999)}"
-    if pid in stok and stok[pid]: kode=stok[pid].pop(0); save_j("stok.json", stok)
-    trx=load_j("trx.json", []); trx.append({"user":uid,"produk":context.user_data.get('produk'),"total":tagihan,"kode":kode})
-    save_j("trx.json", trx); context.user_data.clear()
-    await update.message.reply_text(f"✅ *PEMBAYARAN DITERIMA - {STORE_NAME}*\n📦 {trx[-1]['produk'].upper()}\n🔑 KODE LU:\n`{kode}`", parse_mode='Markdown')
+async def msg_handler(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    mode = c.user_data.get("mode")
+    txt = u.message.text or ""
+    d = load_data()
+    if mode == "input_nominal":
+        if not txt.isdigit():
+            await u.message.reply_text("Angka aja."); return
+        n = int(txt)
+        if n < 1000:
+            await u.message.reply_text("Min 1k"); return
+        c.user_data["mode"]="bayar"; c.user_data["harga"]=n; c.user_data["pid"]="NOMINAL_BEBAS"
+        qr = qrcode.make(d["qris"]); qr.save("qris.png")
+        await u.message.reply_photo(open("qris.png","rb"), caption=f"Bayar Rp{n:,}",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ SUDAH BAYAR", callback_data="paid_bebas")]]))
+    elif mode == "add_prod" and u.effective_user.id==ADMIN_ID:
+        if "|" not in txt:
+            await u.message.reply_text("Format salah. Contoh: Netflix | 15000"); return
+        nama,harga = [x.strip() for x in txt.split("|",1)]
+        pid = f"p{len(d['products'])+1}"
+        d["products"][pid]={"nama":nama,"harga":int(harga),"codes":[]}
+        save_data(d); c.user_data.clear()
+        await u.message.reply_text(f"OK {nama} ID:{pid}\nIsi stok: /addstok {pid}")
 
-async def panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id!=ADMIN_ID: return
-    kb=[[InlineKeyboardButton("➕ TAMBAH PRODUK", callback_data="add_prod")],[InlineKeyboardButton("🗑️ HAPUS PRODUK", callback_data="del_list")],[InlineKeyboardButton("📦 LIHAT PRODUK", callback_data="list_prod")],[InlineKeyboardButton("🚫 LIST BANNED", callback_data="list_ban")]]
-    await update.message.reply_text(f"⚙️ *{STORE_NAME} - PANEL ADMIN*", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+async def set_qris(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    if u.effective_user.id!=ADMIN_ID: return
+    d=load_data(); d["qris"]=" ".join(c.args) if c.args else "BELUM DISET"; save_data(d)
+    await u.message.reply_text("QRIS updated.")
 
-async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q=update.callback_query; await q.answer(); await q.message.reply_text("KIRIM *NAMA PRODUK*:", parse_mode='Markdown'); return NAMA
-async def add_nama(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['nama_baru']=update.message.text; await update.message.reply_text("KIRIM *HARGA*:", parse_mode='Markdown'); return HARGA
-async def add_harga(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    db=load_db(); pid=f"p{random.randint(100,999)}"; db['produk'][pid]={"nama":context.user_data['nama_baru'],"harga":int(update.message.text)}; save_db(db)
-    await update.message.reply_text(f"✅ TERSIMPAN! ID: `{pid}`", parse_mode='Markdown'); return ConversationHandler.END
-async def list_prod(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q=update.callback_query; await q.answer(); db=load_db(); stok=load_j("stok.json", {})
-    txt="\n".join([f"- {v['nama'].upper()} : RP{v['harga']:,} | STOK:{len(stok.get(k,[]))} | {k}" for k,v in db["produk"].items()]) or "KOSONG"
-    await q.message.reply_text(f"📦 *{STORE_NAME}*\n{txt}", parse_mode='Markdown')
-async def del_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q=update.callback_query; await q.answer(); db=load_db()
-    kb=[[InlineKeyboardButton(f"🗑️ {v['nama'].upper()}", callback_data=f"del_{k}")] for k,v in db["produk"].items()]
-    await q.message.reply_text("PILIH:", reply_markup=InlineKeyboardMarkup(kb))
-async def del_exec(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q=update.callback_query; await q.answer(); db=load_db(); pid=q.data.split("_",1)[1]
-    if pid in db["produk"]: del db["produk"][pid]; save_db(db)
-    await q.message.reply_text("✅ DIHAPUS!")
-async def list_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q=update.callback_query; await q.answer(); await q.message.reply_text(f"🚫 {load_j('banned.json',[])}")
-async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id!=ADMIN_ID: return
-    b=load_j("banned.json",[]); b.append(int(context.args[0])); save_j("banned.json",b); await update.message.reply_text("✅ BANNED.")
-async def unban(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id!=ADMIN_ID: return
-    b=load_j("banned.json",[]); b.remove(int(context.args[0])); save_j("banned.json",b); await update.message.reply_text("✅ UNBANNED.")
-async def set_qris_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id!=ADMIN_ID: return
-    await update.message.reply_text("KIRIM STRING QRIS:"); return SET_QRIS
-async def set_qris_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    db=load_db(); db["qris_statis"]=update.message.text.strip(); save_db(db)
-    await update.message.reply_text("✅ QRIS UPDATE!"); return ConversationHandler.END
-async def addstok(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id!=ADMIN_ID: return
-    try: pid=context.args[0]
-    except: await update.message.reply_text("PAKAI: `/addstok p123`", parse_mode='Markdown'); return
-    isi=update.message.text.split("\n")[1:]; s=load_j("stok.json", {}); s[pid]=s.get(pid,[])+[x.strip() for x in isi if x.strip()]; save_j("stok.json", s)
-    await update.message.reply_text(f"✅ {len(isi)} KODE MASUK. TOTAL: {len(s[pid])}")
-async def omset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id!=ADMIN_ID: return
-    trx=load_j("trx.json", []); total=sum(x['total'] for x in trx)
-    await update.message.reply_text(f"💰 *{STORE_NAME} - OMSET*\n📊 TRANSAKSI: {len(trx)}\n💵 TOTAL: RP{total:,}", parse_mode='Markdown')
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id!=ADMIN_ID: return
-    pesan=" ".join(context.args); users=load_j("users.json", []); ok=0
-    for uid in users:
-        try: await context.bot.send_message(uid, f"📢 *{STORE_NAME}*\n\n{pesan}", parse_mode='Markdown'); ok+=1
-        except: pass
-    await update.message.reply_text(f"✅ TERKIRIM KE {ok} USER.")
+async def addstok(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    if u.effective_user.id!=ADMIN_ID or not c.args: return
+    c.user_data["addstok_pid"]=c.args[0]
+    c.user_data["mode"]="addstok"
+    await u.message.reply_text(f"Kirim kode untuk {c.args[0]}, 1 baris 1 kode.")
 
-def main():
-    app=Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("panel", panel))
-    app.add_handler(CommandHandler("ban", ban))
-    app.add_handler(CommandHandler("unban", unban))
-    app.add_handler(CommandHandler("omset", omset))
-    app.add_handler(CommandHandler("broadcast", broadcast))
-    app.add_handler(CommandHandler("addstok", addstok))
-    app.add_handler(CallbackQueryHandler(buy, pattern="^buy_"))
-    app.add_handler(CallbackQueryHandler(del_exec, pattern="^del_p"))
-    app.add_handler(CallbackQueryHandler(del_list, pattern="^del_list$"))
-    app.add_handler(CallbackQueryHandler(list_prod, pattern="^list_prod$"))
-    app.add_handler(CallbackQueryHandler(list_ban, pattern="^list_ban$"))
-    app.add_handler(MessageHandler(filters.PHOTO, auto_cek))
-    app.add_handler(ConversationHandler(entry_points=[CallbackQueryHandler(add_start, pattern="^add_prod$")], states={NAMA:[MessageHandler(filters.TEXT & ~filters.COMMAND, add_nama)], HARGA:[MessageHandler(filters.TEXT & ~filters.COMMAND, add_harga)]}, fallbacks=[]))
-    app.add_handler(ConversationHandler(entry_points=[CommandHandler("set_qris", set_qris_start)], states={SET_QRIS:[MessageHandler(filters.TEXT & ~filters.COMMAND, set_qris_save)]}, fallbacks=[]))
-    app.add_handler(ConversationHandler(entry_points=[CallbackQueryHandler(bebas_start, pattern="^bebas$")], states={NOMINAL_BEBAS:[MessageHandler(filters.TEXT & ~filters.COMMAND, bebas_exec)]}, fallbacks=[]))
-    app.run_polling()
-if __name__=="__main__": main()
+# handle addstok text
+async def msg_wrapper(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    if c.user_data.get("mode")=="addstok":
+        d=load_data(); pid=c.user_data["addstok_pid"]
+        codes=[x.strip() for x in u.message.text.split("\n") if x.strip()]
+        if pid in d["products"]:
+            d["products"][pid]["codes"].extend(codes); save_data(d)
+            await u.message.reply_text(f"Stok nambah {len(codes)}")
+        c.user_data.clear(); return
+    await msg_handler(u,c)
+
+app = ApplicationBuilder().token(TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("panel", panel))
+app.add_handler(CommandHandler("set_qris", set_qris))
+app.add_handler(CommandHandler("addstok", addstok))
+app.add_handler(CallbackQueryHandler(button_handler))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, msg_wrapper))
+print("Bot jalan...")
+app.run_polling()
