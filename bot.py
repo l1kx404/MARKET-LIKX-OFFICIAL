@@ -151,7 +151,19 @@ def main():
     app.add_handler(CommandHandler("broadcast", broadcast))
     app.add_handler(CommandHandler("addstok", addstok))
     app.add_handler(CommandHandler("set_channel", set_channel))
-    app.add_handler(CallbackQueryHandler(channel_info, pattern="^channel_info$"))
-    app.add_handler(CallbackQueryHandler(buy, pattern="^buy_"))
-    app.add_handler(CallbackQueryHandler(del_exec, pattern="^del_p"))
-    app.add_handler(CallbackQueryHandler(del_list, pattern="^del
+    app.add_handler(CallbackQueryHandler(channel_info, pattern="channel_info"))
+    app.add_handler(CallbackQueryHandler(buy, pattern="buy_"))
+    app.add_handler(CallbackQueryHandler(del_exec, pattern="del_p"))
+    app.add_handler(CallbackQueryHandler(del_list, pattern="del_list"))
+    app.add_handler(CallbackQueryHandler(list_prod, pattern="list_prod"))
+    app.add_handler(CallbackQueryHandler(list_ban, pattern="list_ban"))
+    app.add_handler(CallbackQueryHandler(acc_handler, pattern="acc_"))
+    app.add_handler(CallbackQueryHandler(acc_handler, pattern="tolak_"))
+    app.add_handler(CallbackQueryHandler(add_start, pattern="add_prod"))
+    app.add_handler(MessageHandler(filters.PHOTO, foto_pending))
+    app.add_handler(ConversationHandler(entry_points=[CallbackQueryHandler(add_start, pattern="add_prod")], states={NAMA:[MessageHandler(filters.TEXT & ~filters.COMMAND, add_nama)], HARGA:[MessageHandler(filters.TEXT & ~filters.COMMAND, add_harga)]}, fallbacks=[]))
+    app.add_handler(ConversationHandler(entry_points=[CommandHandler("set_qris", set_qris_start)], states={SET_QRIS:[MessageHandler(filters.TEXT & ~filters.COMMAND, set_qris_save)]}, fallbacks=[]))
+    app.run_polling()
+
+if __name__=="__main__":
+    main()
