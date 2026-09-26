@@ -159,7 +159,6 @@ def main():
     app.add_handler(CallbackQueryHandler(list_ban, pattern="list_ban"))
     app.add_handler(CallbackQueryHandler(acc_handler, pattern="acc_"))
     app.add_handler(CallbackQueryHandler(acc_handler, pattern="tolak_"))
-    app.add_handler(CallbackQueryHandler(add_start, pattern="add_prod"))
     app.add_handler(MessageHandler(filters.PHOTO, foto_pending))
     app.add_handler(ConversationHandler(entry_points=[CallbackQueryHandler(add_start, pattern="add_prod")], states={NAMA:[MessageHandler(filters.TEXT & ~filters.COMMAND, add_nama)], HARGA:[MessageHandler(filters.TEXT & ~filters.COMMAND, add_harga)]}, fallbacks=[]))
     app.add_handler(ConversationHandler(entry_points=[CommandHandler("set_qris", set_qris_start)], states={SET_QRIS:[MessageHandler(filters.TEXT & ~filters.COMMAND, set_qris_save)]}, fallbacks=[]))
