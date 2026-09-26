@@ -82,7 +82,7 @@ async def acc_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(data['user'], f"✅ PEMBAYARAN DI-ACC ADMIN\n📦 {data['produk'].upper()}\n🔑 KODE LU:\n`{kode}`", parse_mode='Markdown')
         await q.message.reply_text("✅ Udah dikirim ke user.")
     else:
-        await context.bot.send_message(data['user'], await context.bot.send_message(data['user'], "❌ BUKTI DI TOLAK.\nANDA MENGIRIM BUKTI PALSU ATAU BELUM MEYELESAIKAN PEMBAYARAN ANDA !!!\nCOBA LAGI UNTUK MENGIRIM BUKTI TRANSAKSI DAN MEYELESAIKAN PEMBAYARAN ANDA TERLEBIH DAHULU")
+        await context.bot.send_message(data['user'], "❌ BUKTI DI TOLAK.\nANDA MENGIRIM BUKTI PALSU ATAU BELUM MEYELESAIKAN PEMBAYARAN ANDA !!!\nCOBA LAGI UNTUK MENGIRIM BUKTI TRANSAKSI DAN MEYELESAIKAN PEMBAYARAN ANDA TERLEBIH DAHULU")
         await q.message.reply_text("❌ Udah ditolak.")
 
 async def panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
